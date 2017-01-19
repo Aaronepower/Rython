@@ -5,7 +5,7 @@ use std::str::CharIndices;
 use itertools::multipeek;
 use itertools::structs::MultiPeek;
 
-pub type LexResult<'a> = Result<(u8, PhysicalLine<'a>), LexerError<'a>>;
+pub type LexResult<'a> = Result<Lexeme<'a>, LexerError<'a>>;
 
 use symbols::*;
 use lexeme::*;
@@ -22,7 +22,8 @@ macro_rules! get_or_eof {
 
 pub struct Lexer<'a> {
     iter: MultiPeek<CharIndices<'a>>,
-    output: Vec<LexResult<'a>>,
+    output: Vec<Lexeme<'a>>,
+    stack: Vec<u8>,
     source: &'a str,
 }
 
@@ -32,6 +33,7 @@ impl<'a> Lexer<'a> {
         Lexer {
             iter: multipeek(source.char_indices()),
             output: Vec::new(),
+            stack: Vec::new(),
             source: source,
         }
     }
@@ -39,22 +41,27 @@ impl<'a> Lexer<'a> {
     pub fn lex(&mut self) {
         loop {
             match self.lex_line() {
-                Err(Eof) => break,
-                lexeme => self.output.push(lexeme),
+                Err(LexerError::Continue) => continue,
+                Err(LexerError::Eof) => break,
+                Err(error) => panic!("{:?}", error),
+                Ok((indent, lex)) => {
+                    self.output.extend(lex);
+                    self.output.push(Lexeme::Newline);
+                    self.stack.push(indent);
+                },
             }
         }
     }
 
-    pub fn output(self) -> Vec<LexResult<'a>> {
+    pub fn output(self) -> Vec<Lexeme<'a>> {
         self.output
     }
 
-    fn lex_line(&mut self) -> LexResult<'a> {
+    fn lex_line(&mut self) -> Result<(u8, Vec<Lexeme<'a>>), LexerError<'a>> {
         let mut line = Vec::new();
         let mut indent = 0;
         let mut delimit_stack = Vec::new();
 
-        self.remove_empty_line();
         self.reset_peek();
 
         while let Some(&(_, ch)) = self.peek() {
@@ -63,20 +70,15 @@ impl<'a> Lexer<'a> {
                     indent += 1;
                     self.consume();
                 }
-                '\n' => {
+                NEWLINE | FORMFEED | CARRIAGE => {
                     self.consume();
-                    return Ok((0, PhysicalLine(line)));
+                    return Err(Continue);
                 }
                 _ => break,
             }
         }
 
-        for result in self.output.iter().rev() {
-            let &(last, _) = match *result {
-                Ok(ref tuple) => tuple,
-                _ => return Err(Eof),
-            };
-
+        for &last in self.stack.iter().rev() {
             if indent == last {
                 break;
             } else if indent > last {
@@ -130,16 +132,14 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        Ok((indent, PhysicalLine(line)))
+        Ok((indent, line))
     }
 
     fn consume(&mut self) {
         let _ = self.next();
     }
 
-    fn lex_leading_dot(&mut self, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
-    {
+    fn lex_leading_dot(&mut self, start: usize) -> LexResult<'a> {
         let mut string = String::from(".");
 
         loop {
@@ -185,7 +185,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_number(&mut self, ch: char, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
+        -> LexResult<'a>
     {
         if ch == '0' {
             if let Some(&(_, ch)) = self.peek() {
@@ -209,9 +209,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_integer(&mut self, number: char, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
-    {
+    fn lex_integer(&mut self, number: char, start: usize) -> LexResult<'a> {
         let mut literal = String::new();
         literal.push(number);
 
@@ -244,18 +242,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_float(&mut self, literal: &str, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
-    {
+    fn lex_float(&mut self, literal: &str, start: usize) -> LexResult<'a> {
         match literal.parse::<f64>() {
             Ok(float) => Ok(Lexeme::Float(float)),
             Err(_) => Err(InvalidFloat(start)),
         }
     }
 
-    fn lex_leading_zero(&mut self, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
-    {
+    fn lex_leading_zero(&mut self, start: usize) -> LexResult<'a> {
         let mut literal = String::new();
         loop {
 
@@ -372,11 +366,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_operator(&mut self, start: usize)
-        -> Result<Lexeme<'a>, LexerError<'a>>
-    {
-
+    fn lex_operator(&mut self, start: usize) -> LexResult<'a> {
         let mut end = start;
+
         if let Some(&(y_end, y)) = self.peek() {
             if Operator::is_operator_term(y) {
                 if let Some(&(z_end, z)) = self.peek() {
@@ -396,11 +388,12 @@ impl<'a> Lexer<'a> {
         if let Some(operator) = Operator::is_operator(word) {
             let operator = match operator {
                 operator @ Operator::Add | operator @ Operator::Sub => {
-                    if let Some((_, ch)) = self.next() {
-                        if ch.is_alphabetic() {
+                    if let Some(&(_, ref ch)) = self.peek() {
+                        if ch.is_alphanumeric() {
                             match operator {
                                 Operator::Add => Operator::UnaryAdd,
                                 Operator::Sub => Operator::UnarySub,
+                                Operator::Not => Operator::UnaryNot,
                                 _ => unreachable!(),
                             }
                         } else {
@@ -419,11 +412,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_str(&mut self,
-                   start: usize,
-                   quote: char,
-                   prefixes: [Prefix; 2])
-        -> Result<Lexeme<'a>, LexerError<'a>>
+    fn lex_str(&mut self, start: usize, quote: char, prefixes: [Prefix; 2])
+        -> LexResult<'a>
     {
         let mut quote_len = 1;
         let mut string = String::new();
@@ -556,8 +546,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_word(&mut self, start: usize) -> Result<Lexeme<'a>, LexerError<'a>>
-    {
+    fn lex_word(&mut self, start: usize) -> LexResult<'a> {
         let mut end = start;
         loop {
             let &(new_end, ch) = get_or_eof!(self.peek());
@@ -589,32 +578,14 @@ impl<'a> Lexer<'a> {
             Ok(Lexeme::Identifier(start, word))
         }
     }
-
-    fn remove_empty_line(&mut self) {
-        let mut pop = false;
-        if let Some(&Ok((_, ref line))) = self.output.last() {
-            if line.is_empty() {
-                pop = true;
-            }
-        }
-
-        if pop {
-            let _ = self.output.pop();
-        }
-    }
 }
 
 impl<'a> fmt::Debug for Lexer<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for result in &self.output {
-            match result {
-                &Ok((_, PhysicalLine(ref vec))) => {
-                    for lexeme in vec {
-                        write!(f, "{:?}", lexeme)?;
-                    }
-                    write!(f, "\n")?;
-                }
-                error => write!(f, "{:?}", error)?,
+        for lexeme in &self.output {
+            match *lexeme {
+                ref n @ Lexeme::Newline => write!(f, " {:?}\n", n)?,
+                ref lexeme => write!(f, " {:?} ", lexeme)?,
             }
         }
         write!(f, "")
@@ -636,6 +607,7 @@ impl<'a> ops::DerefMut for Lexer<'a> {
 
 #[derive(Clone, Debug)]
 pub enum LexerError<'a> {
+    Continue,
     Eof,
     InvalidEscape(usize),
     InvalidHex(usize),

@@ -1,25 +1,27 @@
-#[derive(Clone, Debug, Default)]
-pub struct PhysicalLine<'a>(pub Vec<Lexeme<'a>>);
-
-impl<'a> PhysicalLine<'a> {
-    pub fn is_empty(&self) -> bool {
-        let PhysicalLine(ref vec) = *self;
-        vec.is_empty()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Lexeme<'a> {
     Bytes(usize, Vec<u8>),
     Dedent,
     Delimiter(usize, Delimiter),
-    Identifier(usize, &'a str),
     Float(f64),
+    Identifier(usize, &'a str),
     Indent,
     Integer(i64),
     Keyword(usize, Keyword),
+    Newline,
     Operator(Operator),
     Str(usize, String),
+}
+
+impl<'a> Lexeme<'a> {
+    pub fn is_unary(&self) -> bool {
+        match *self {
+            Lexeme::Operator(Operator::UnaryAdd) |
+            Lexeme::Operator(Operator::UnarySub) |
+            Lexeme::Operator(Operator::UnaryNot) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,7 +77,7 @@ impl Delimiter {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Operator {
     Access,
     Add,
@@ -104,8 +106,8 @@ pub enum Operator {
     PowAssign,
     Rem,
     RemAssign,
-    RoundDiv,
-    RoundDivAssign,
+    FloorDiv,
+    FloorDivAssign,
     Sep,
     Shl,
     ShlAssign,
@@ -116,6 +118,7 @@ pub enum Operator {
     Term,
     UnaryAdd,
     UnarySub,
+    UnaryNot,
     Xor,
     XorAssign,
 }
@@ -161,8 +164,8 @@ impl Operator {
             "**=" => Some(PowAssign),
             "%" => Some(Rem),
             "%=" => Some(RemAssign),
-            "//" => Some(RoundDiv),
-            "//=" => Some(RoundDivAssign),
+            "//" => Some(FloorDiv),
+            "//=" => Some(FloorDivAssign),
             "<<" => Some(Shl),
             "<<=" => Some(ShlAssign),
             ">>" => Some(Shr),
@@ -221,77 +224,79 @@ impl Prefix {
 
 #[derive(Clone, Debug)]
 pub enum Keyword {
-    False,
-    Class,
-    Finally,
-    Is,
-    Return,
-    None,
-    Continue,
-    For,
-    Lambda,
-    Try,
-    True,
-    Def,
-    From,
-    NonLocal,
-    While,
     And,
-    Del,
-    Global,
-    Not,
-    With,
     As,
-    Elif,
-    If,
-    Or,
-    Yield,
     Assert,
-    Else,
-    Import,
-    Pass,
+    Await,
     Break,
+    Class,
+    Continue,
+    Def,
+    Del,
+    Elif,
+    Else,
     Except,
+    False,
+    Finally,
+    For,
+    From,
+    Global,
+    If,
+    Import,
     In,
+    Is,
+    Lambda,
+    NonLocal,
+    None,
+    Not,
+    Or,
+    Pass,
     Raise,
+    Return,
+    True,
+    Try,
+    While,
+    With,
+    Yield,
 }
 
 impl Keyword {
     pub fn is_keyword(name: &str) -> Option<Self> {
         match name {
             "False" => Some(Keyword::False),
-            "class" => Some(Keyword::Class),
-            "finally" => Some(Keyword::Finally),
-            "is" => Some(Keyword::Is),
-            "return" => Some(Keyword::Return),
             "None" => Some(Keyword::None),
-            "continue" => Some(Keyword::Continue),
-            "for" => Some(Keyword::For),
-            "lambda" => Some(Keyword::Lambda),
-            "try" => Some(Keyword::Try),
             "True" => Some(Keyword::True),
-            "def" => Some(Keyword::Def),
-            "from" => Some(Keyword::From),
-            "nonlocal" => Some(Keyword::NonLocal),
-            "while" => Some(Keyword::While),
             "and" => Some(Keyword::And),
-            "del" => Some(Keyword::Del),
-            "global" => Some(Keyword::Global),
-            "not" => Some(Keyword::Not),
-            "with" => Some(Keyword::With),
             "as" => Some(Keyword::As),
-            "elif" => Some(Keyword::Elif),
-            "if" => Some(Keyword::If),
-            "or" => Some(Keyword::Or),
-            "yield" => Some(Keyword::Yield),
             "assert" => Some(Keyword::Assert),
-            "else" => Some(Keyword::Else),
-            "import" => Some(Keyword::Import),
-            "pass" => Some(Keyword::Pass),
+            "await" => Some(Keyword::Await),
             "break" => Some(Keyword::Break),
+            "class" => Some(Keyword::Class),
+            "continue" => Some(Keyword::Continue),
+            "def" => Some(Keyword::Def),
+            "del" => Some(Keyword::Del),
+            "elif" => Some(Keyword::Elif),
+            "else" => Some(Keyword::Else),
             "except" => Some(Keyword::Except),
+            "finally" => Some(Keyword::Finally),
+            "for" => Some(Keyword::For),
+            "from" => Some(Keyword::From),
+            "global" => Some(Keyword::Global),
+            "if" => Some(Keyword::If),
+            "import" => Some(Keyword::Import),
             "in" => Some(Keyword::In),
+            "is" => Some(Keyword::Is),
+            "lambda" => Some(Keyword::Lambda),
+            "nonlocal" => Some(Keyword::NonLocal),
+            "not" => Some(Keyword::Not),
+            "or" => Some(Keyword::Or),
+            "pass" => Some(Keyword::Pass),
             "raise" => Some(Keyword::Raise),
+            "return" => Some(Keyword::Return),
+            "try" => Some(Keyword::Try),
+            "while" => Some(Keyword::While),
+            "with" => Some(Keyword::With),
+            "yield" => Some(Keyword::Yield),
             _ => None,
         }
     }

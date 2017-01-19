@@ -3,6 +3,7 @@ extern crate itertools;
 mod lexeme;
 mod lexer;
 mod symbols;
+mod ast;
 mod parser;
 mod types;
 mod symbol_table;
@@ -32,13 +33,14 @@ mod tests {
             File::open(file.path()).unwrap().read_to_string(&mut contents).unwrap();
             let mut lexer = ::lexer::Lexer::new(&contents);
             lexer.lex();
-
-            for entry in lexer.output().iter() {
-                match *entry {
-                    Ok(ref line) => println!("{:?}", line),
-                    Err(ref error) => panic!("{:?}", error),
-                }
-            }
+            println!("---------------------LEXER OUTPUT----------------------");
+            println!("{:?}", lexer);
+            println!("---------------------LEXER OUTPUT----------------------");
+            let mut parser = ::parser::Parser::new(lexer.output());
+            parser.parse();
+            println!("---------------------PARSER OUTPUT---------------------");
+            println!("{:#?}", parser);
+            println!("---------------------PARSER OUTPUT---------------------");
         }
     }
 }
