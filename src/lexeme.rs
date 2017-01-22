@@ -77,7 +77,7 @@ impl Delimiter {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operator {
     Access,
     Add,
@@ -133,6 +133,19 @@ impl Operator {
             _ => false,
         }
     }
+    // comp_op: '<'|'>'|'=='|'>='|'<='|'<>'|'!='
+    pub fn is_comp_op(self) -> bool {
+        match self {
+            Operator::LessThan      |
+            Operator::MoreThan      |
+            Operator::Equals        |
+            Operator::LessThanEqual |
+            Operator::MoreThanEqual |
+            Operator::NotEquals     => true,
+            _ => false,
+        }
+    }
+
     pub fn is_operator(string: &str) -> Option<Self> {
         use self::Operator::*;
         match string {
@@ -180,7 +193,7 @@ impl Operator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Prefix {
     Raw,
     Formatted,
@@ -221,8 +234,7 @@ impl Prefix {
     }
 }
 
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Keyword {
     And,
     As,
@@ -245,10 +257,12 @@ pub enum Keyword {
     Import,
     In,
     Is,
+    IsNot,
     Lambda,
     NonLocal,
     None,
     Not,
+    NotIn,
     Or,
     Pass,
     Raise,
@@ -298,6 +312,13 @@ impl Keyword {
             "with" => Some(Keyword::With),
             "yield" => Some(Keyword::Yield),
             _ => None,
+        }
+    }
+    // 'in'|'not' 'in'|'is'|'is' 'not'
+    pub fn is_comp_keyword(self) -> bool {
+        match self {
+            Keyword::In | Keyword::Not | Keyword::Is => true,
+            _ => false
         }
     }
 }

@@ -93,26 +93,19 @@ impl<'a> Lexer<'a> {
             let (start, ch) = get_or_eof!(self.next());
 
             if ch.is_alphabetic() || ch == '_' {
-
                 line.push(self.lex_word(start)?);
             } else if ch.is_digit(10) {
-
                 line.push(self.lex_number(ch, start)?);
             } else if ch == '.' {
-
                 line.push(self.lex_leading_dot(start)?);
             } else if ch == '\'' || ch == '"' {
-
                 const NO_PREFIX: [Prefix; 2] = [Prefix::Ignore, Prefix::Ignore];
                 line.push(self.lex_str(start, ch, NO_PREFIX)?);
             } else if Operator::is_operator_term(ch) {
-
                 line.push(self.lex_operator(start)?);
             } else if let Some(delimiter) = Delimiter::is_delimiter(ch) {
-
                 line.push(self.lex_delimiter(start, delimiter, &mut delimit_stack));
             } else if ch == '#' {
-
                 loop {
                     let &(_, ch) = get_or_eof!(self.peek());
 
@@ -123,10 +116,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
             } else if ch == ESCAPE {
-
                 self.lex_escape()?;
             } else if ch == NEWLINE || ch == CARRIAGE || ch == FORMFEED {
-
                 if delimit_stack.is_empty() {
                     break 'line;
                 }

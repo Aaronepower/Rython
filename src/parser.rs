@@ -1,4 +1,4 @@
-use std::ops;
+use std::{fmt, ops};
 use std::vec::IntoIter;
 
 use itertools::{self, MultiPeek};
@@ -18,9 +18,9 @@ macro_rules! get_or_eof {
     }
 }
 
-type ExpressionResult<'a> = Result<Expression<'a>, ParseError<'a>>;
+pub type Result<'a, T: 'a> = ::std::result::Result<T, ParseError<'a>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Parser<'a>{
     iter: MultiPeek<IntoIter<Lexeme<'a>>>,
     output: Vec<Ast<'a>>
@@ -39,11 +39,110 @@ impl<'a> Parser<'a> {
         let _ = self.next();
     }
 
-    pub fn parse(&mut self) {
-        unimplemented!()
+    pub fn output(self) -> Vec<Ast<'a>> {
+        self.output
     }
 
-    fn parse_await(&mut self) -> ExpressionResult<'a> {
+    pub fn parse(&mut self) -> Result<'a, ()> {
+        while let Some(_) = self.peek() {
+            self.reset_peek();
+
+            let stmt = self.parse_stmt()?;
+            self.output.push(Ast::Statement(stmt));
+        }
+        Ok(())
+    }
+
+    fn parse_stmt(&mut self) -> Result<'a, Statement<'a>> {
+        let lhs = self.parse_test()?;
+        self.consume();
+        let rhs = self.parse_expr()?;
+        self.consume();
+
+        Ok(Statement::Assignment(lhs, rhs))
+    }
+
+    fn parse_comparison(&mut self) -> Result<'a, Expression<'a>> {
+        use lexeme::Keyword::*;
+        let lhs = self.parse_expr()?;
+
+        let comp = match self.peek() {
+            Some(&Lexeme::Operator(operator)) if operator.is_comp_op() => {
+                self.consume();
+                Comparison::Op(lhs, operator, self.parse_expr()?)
+            }
+            Some(&Lexeme::Keyword(_, keyword)) if keyword.is_comp_keyword() => {
+                self.consume();
+                let keyword = if keyword == Is {
+                    if let Lexeme::Keyword(_, Not) = *self.peek().expect(&format!("{}", line!())) {
+                        IsNot
+                    } else {
+                        keyword
+                    }
+                } else if keyword == Not {
+                    if let Lexeme::Keyword(_, In) = *self.peek().expect(&format!("{}", line!())) {
+                        NotIn
+                    } else {
+                        keyword
+                    }
+                } else {
+                    keyword
+                };
+
+                Comparison::Keyword(lhs, keyword, self.parse_expr()?)
+            }
+            _ => Comparison::Truthy(lhs)
+        };
+
+        Ok(Expression::Comparison(Box::new(comp)))
+    }
+
+    fn parse_not_test(&mut self) -> Result<'a, Expression<'a>> {
+        use lexeme::Keyword::*;
+        if let Some(&Lexeme::Keyword(_, Not)) = self.peek() {
+            self.consume();
+            let comp = Box::new(Comparison::Notty(self.parse_not_test()?));
+            Ok(Expression::Comparison(comp))
+        } else {
+            self.parse_comparison()
+        }
+    }
+
+    fn parse_and_test(&mut self) -> Result<'a, Expression<'a>> {
+        use lexeme::Keyword::*;
+        let lhs = self.parse_not_test()?;
+
+        let comp = if let Some(&Lexeme::Keyword(_, And)) = self.peek() {
+            self.consume();
+            let rhs = self.parse_not_test()?;
+            Expression::Comparison(Box::new(Comparison::Keyword(lhs, And, rhs)))
+        } else {
+            lhs
+        };
+
+        Ok(comp)
+    }
+
+    fn parse_or_test(&mut self) -> Result<'a, Expression<'a>> {
+        use lexeme::Keyword::*;
+        let lhs = self.parse_and_test()?;
+
+        let comp = if let Some(&Lexeme::Keyword(_, Or)) = self.peek() {
+            self.consume();
+            let rhs = self.parse_and_test()?;
+            Expression::Comparison(Box::new(Comparison::Keyword(lhs, Or, rhs)))
+        } else {
+            lhs
+        };
+
+        Ok(comp)
+    }
+
+    fn parse_test(&mut self) -> Result<'a, Expression<'a>> {
+        self.parse_or_test()
+    }
+
+    fn parse_await(&mut self) -> Result<'a, Expression<'a>> {
         if let Some(&Lexeme::Keyword(_, Keyword::Await)) = self.peek() {
             self.consume();
             Ok(Expression::Await(Box::new(self.parse_primary()?)))
@@ -52,7 +151,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_primary(&mut self) -> ExpressionResult<'a> {
+    fn parse_primary(&mut self) -> Result<'a, Expression<'a>> {
         let atom = self.parse_atom()?;
 
         match self.peek() {
@@ -97,16 +196,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_arg_list(&mut self) -> ExpressionResult<'a> {
+    fn parse_arg_list(&mut self) -> Result<'a, Expression<'a>> {
         unimplemented!()
     }
 
-    fn parse_sub_list(&mut self) -> ExpressionResult<'a> {
+    fn parse_sub_list(&mut self) -> Result<'a, Expression<'a>> {
         unimplemented!()
     }
 
-    fn parse_atom(&mut self) -> ExpressionResult<'a> {
-        let atom: Atom = match self.next().unwrap() {
+    fn parse_atom(&mut self) -> Result<'a, Expression<'a>> {
+        let atom: Atom = match self.next().expect(&format!("{}", line!())) {
             Lexeme::Identifier(index, name) => {
                 Atom::Identifier(index, name)
             }
@@ -158,18 +257,18 @@ impl<'a> Parser<'a> {
             Lexeme::Keyword(_, Keyword::Yield) => {
                 unimplemented!();
             }
-            _ => unimplemented!(),
+            other => panic!("{:?}", other),
         };
 
         Ok(Expression::Primary(Primary::Atom(atom)))
     }
 
-    fn parse_pow(&mut self) -> ExpressionResult<'a> {
+    fn parse_pow(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_await()?;
-        match *self.peek().unwrap() {
+        match *self.peek().expect(&format!("{}", line!())) {
             Lexeme::Operator(op @ Operator::Pow) => {
                 self.consume();
-                let is_unary = self.peek().unwrap().is_unary();
+                let is_unary = self.peek().expect(&format!("{}", line!())).is_unary();
                 let rhs = if is_unary {
                     self.parse_unary()?
                 } else {
@@ -182,8 +281,8 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn parse_unary(&mut self) -> ExpressionResult<'a> {
-        match *self.peek().unwrap() {
+    fn parse_unary(&mut self) -> Result<'a, Expression<'a>> {
+        match *self.peek().expect(&format!("{}", line!())) {
             Lexeme::Operator(op @ Operator::UnaryAdd) |
             Lexeme::Operator(op @ Operator::UnaryNot) |
             Lexeme::Operator(op @ Operator::UnarySub) => {
@@ -194,25 +293,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_term(&mut self) -> ExpressionResult<'a> {
+    fn parse_term(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_unary()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::Mul) |
-            Lexeme::Operator(op @ Operator::Dec) |
-            Lexeme::Operator(op @ Operator::Div) |
-            Lexeme::Operator(op @ Operator::Rem) |
-            Lexeme::Operator(op @ Operator::FloorDiv) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::Mul)) |
+            Some(&Lexeme::Operator(op @ Operator::Dec)) |
+            Some(&Lexeme::Operator(op @ Operator::Div)) |
+            Some(&Lexeme::Operator(op @ Operator::Rem)) |
+            Some(&Lexeme::Operator(op @ Operator::FloorDiv)) => {
                 Ok(Expression::new_binary_op(lhs, op, self.parse_unary()?))
             }
             _ => Ok(lhs),
         }
     }
 
-    fn parse_arith(&mut self) -> ExpressionResult<'a> {
+    fn parse_arith(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_term()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::Add) |
-            Lexeme::Operator(op @ Operator::Sub) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::Add)) |
+            Some(&Lexeme::Operator(op @ Operator::Sub)) => {
                 self.consume();
                 Ok(Expression::new_binary_op(lhs, op, self.parse_term()?))
             }
@@ -220,11 +319,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_shift(&mut self) -> ExpressionResult<'a> {
+    fn parse_shift(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_arith()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::Shl) |
-            Lexeme::Operator(op @ Operator::Shr) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::Shl)) |
+            Some(&Lexeme::Operator(op @ Operator::Shr)) => {
                 self.consume();
                 Ok(Expression::new_binary_op(lhs, op, self.parse_arith()?))
             }
@@ -232,10 +331,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_and(&mut self) -> ExpressionResult<'a> {
+    fn parse_and(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_shift()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::And) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::And)) => {
                 self.consume();
                 Ok(Expression::new_binary_op(lhs, op, self.parse_shift()?))
             }
@@ -243,10 +342,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_xor(&mut self) -> ExpressionResult<'a> {
+    fn parse_xor(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_and()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::Xor) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::Xor)) => {
                 self.consume();
                 Ok(Expression::new_binary_op(lhs, op, self.parse_and()?))
             }
@@ -254,10 +353,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_expr(&mut self) -> ExpressionResult<'a> {
+    fn parse_expr(&mut self) -> Result<'a, Expression<'a>> {
         let lhs = self.parse_xor()?;
-        match *self.peek().unwrap() {
-            Lexeme::Operator(op @ Operator::Or) => {
+        match self.peek() {
+            Some(&Lexeme::Operator(op @ Operator::Or)) => {
                 self.consume();
                 Ok(Expression::new_binary_op(lhs, op, self.parse_xor()?))
             }
@@ -265,11 +364,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_dict(&mut self) -> ExpressionResult<'a> {
+    fn parse_dict(&mut self) -> Result<'a, Expression<'a>> {
         unimplemented!()
     }
 
-    fn parse_list(&mut self) -> ExpressionResult<'a> {
+    fn parse_list(&mut self) -> Result<'a, Expression<'a>> {
         unimplemented!()
     }
 
@@ -298,5 +397,15 @@ impl<'a> ops::Deref for Parser<'a> {
 impl<'a> ops::DerefMut for Parser<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.iter
+    }
+}
+
+impl<'a> fmt::Debug for Parser<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut iter = self.output.iter();
+        while let Some(ref ast) = iter.next() {
+            write!(f, "{:?}\n", ast)?;
+        }
+        Ok(())
     }
 }

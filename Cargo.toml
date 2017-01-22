@@ -5,6 +5,7 @@ version = "0.1.0"
 [dependencies]
 itertools = { git = "https://github.com/bluss/rust-itertools" }
 owned_chars = "*"
+rustyline = "*"
 
 [dev-dependencies]
 walkdir = "*"

@@ -1,17 +1,18 @@
-use lexeme::{Lexeme, Operator};
+use lexeme::{Lexeme, Operator, Keyword};
 use parser::ParseError;
 
 #[derive(Clone, Debug)]
 pub enum Ast<'a> {
-    Statement(Statement),
+    Statement(Statement<'a>),
     Expression(Expression<'a>),
 }
 
 #[derive(Clone, Debug)]
 pub enum Expression<'a> {
-    Primary(Primary<'a>),
     Await(Box<Expression<'a>>),
+    Comparison(Box<Comparison<'a>>),
     Operation(Box<Expression<'a>>, Operator, Option<Box<Expression<'a>>>),
+    Primary(Primary<'a>),
 }
 
 impl<'a> Expression<'a> {
@@ -34,6 +35,15 @@ impl<'a> Expression<'a> {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub enum Comparison<'a> {
+    Op(Expression<'a>, Operator, Expression<'a>),
+    Keyword(Expression<'a>, Keyword, Expression<'a>),
+    Truthy(Expression<'a>),
+    Notty(Expression<'a>),
+}
+
 
 #[derive(Clone, Debug)]
 pub enum Atom<'a> {
@@ -73,9 +83,8 @@ impl<'a> Primary<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub enum Statement {
-    //Compound(CompoundStatement),
-    // Simple(SimpleStatement),
+pub enum Statement<'a> {
+    Assignment(Expression<'a>, Expression<'a>),
 }
 
 /*
